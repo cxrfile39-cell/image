@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>病歷號截圖轉換器</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --muted:#6b7280; --line:#e3e6eb;
+    --accent:#0f6e5c; --accent-soft:#e3f2ee; --warn:#b4540a; --warn-soft:#fdf0e3; --bad:#b42318; --bad-soft:#fdecea;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#14171c; --card:#1c2027; --ink:#e7e9ee; --muted:#9aa1ad; --line:#2c323c;
+      --accent:#4fc3a8; --accent-soft:#16332d; --warn:#f0a35e; --warn-soft:#3a2a19; --bad:#f2827a; --bad-soft:#3a1d1b; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 -apple-system,"Segoe UI","Microsoft JhengHei","PingFang TC",sans-serif}
+  header{padding:18px 24px 6px}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:13px}
+  main{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:18px;padding:12px 24px 28px}
+  @media (max-width:900px){main{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card h2{font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+  .step{display:inline-flex;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;align-items:center;justify-content:center}
+  #drop{border:2px dashed var(--line);border-radius:10px;padding:26px 14px;text-align:center;color:var(--muted);cursor:pointer;transition:.15s;outline:none}
+  #drop:focus,#drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
+  #drop b{color:var(--ink)}
+  .kbd{display:inline-block;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;font-size:12px;background:var(--bg)}
+  .img-item{border:1px solid var(--line);border-radius:10px;margin-top:14px;overflow:hidden}
+  .img-head{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg);border-bottom:1px solid var(--line)}
+  .img-head .t{font-weight:600}
+  .img-head .info{color:var(--muted);font-size:12px;margin-left:auto}
+  .img-body{display:grid;grid-template-columns:auto 1fr;gap:12px;padding:12px;align-items:start}
+  .img-body .pic{max-width:220px;max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:6px;background:#fff}
+  .img-body canvas{display:block;max-width:100%}
+  textarea{width:100%;font:13px/1.6 Consolas,"SFMono-Regular",Menlo,monospace;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;resize:vertical}
+  textarea:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+  .ids{min-height:200px}
+  .flags{font-size:12px;margin-top:6px;line-height:1.7}
+  .pill{display:inline-block;border-radius:999px;padding:0 8px;margin:2px 4px 0 0;font-family:Consolas,monospace}
+  .pill.warn{background:var(--warn-soft);color:var(--warn)}
+  .pill.bad{background:var(--bad-soft);color:var(--bad)}
+  .ok{color:var(--accent)}
+  button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:6px 12px;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button.small{padding:3px 9px;font-size:12px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .opts{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;font-size:13px}
+  .opts label{display:flex;align-items:center;gap:5px;cursor:pointer}
+  #code{min-height:360px;font-size:12px;white-space:pre}
+  .summary{font-size:13px;color:var(--muted);margin:8px 0}
+  .summary b{color:var(--ink)}
+  details{margin-top:14px}
+  summary{cursor:pointer;color:var(--muted);font-size:13px}
+  #tpl{min-height:180px;font-size:12px;white-space:pre;margin-top:8px}
+  .note{font-size:12px;color:var(--muted);margin-top:10px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:8px;font-size:13px;opacity:0;transition:.2s;pointer-events:none}
+  .toast.show{opacity:1}
+  .empty{color:var(--muted);font-size:13px;padding:8px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>病歷號截圖 → 批次查詢腳本</h1>
+  <div class="sub">貼上病歷號欄位截圖，自動辨識並產生可直接貼進 Console 的程式碼。辨識完全在你的瀏覽器內進行，圖片不會上傳。</div>
+</header>
+<main>
+  <section>
+    <div class="card">
+      <h2><span class="step">1</span>貼上截圖</h2>
+      <div id="drop" tabindex="0">
+        點這裡後按 <span class="kbd">Ctrl</span>+<span class="kbd">V</span> 貼上截圖（可連續貼多張）<br>
+        <span style="font-size:12px">或把圖片拖進來／<b id="pick" style="text-decoration:underline;cursor:pointer">選擇檔案</b></span>
+        <input type="file" id="file" accept="image/*" multiple hidden>
+      </div>
+      <div id="list"><div class="empty">尚未加入圖片。</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="card">
+      <h2><span class="step">2</span>產生程式碼</h2>
+      <div class="opts">
+        <label><input type="checkbox" id="optDedupe" checked> 移除重複病歷號</label>
+        <label><input type="checkbox" id="optGroup" checked> 依圖片加註解分組</label>
+        <label><input type="checkbox" id="optSkipBad"> 略過格式／檢查碼不符的項目</label>
+      </div>
+      <div class="summary" id="summary">尚無資料</div>
+      <div class="row" style="margin-bottom:8px">
+        <button class="primary" id="copy">複製程式碼</button>
+        <button id="copyList">只複製清單</button>
+        <button id="clearAll">清除全部圖片</button>
+      </div>
+      <textarea id="code" readonly spellcheck="false"></textarea>
+      <details>
+        <summary>腳本範本（可換成你自己的版本，系統會替換其中的 <code>const histnoList = [ ... ];</code>）</summary>
+        <textarea id="tpl" spellcheck="false"></textarea>
+        <div class="row" style="margin-top:6px">
+          <button class="small" id="tplReset">還原預設範本</button>
+          <span class="note" id="tplState" style="margin:0"></span>
+        </div>
+      </details>
+      <div class="note">
+        小技巧：辨識有錯時直接在左側文字框修改，再按「用此結果校正辨識」，之後同樣字型的截圖會越認越準（校正資料只存在這台電腦的瀏覽器）。
+      </div>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script type="text/plain" id="defaultTpl">(async function runBatchQueryBackground() {
+    const histnoList = [
+        "1647856-1"
+    ];
+
+    let stopRequested = false;
+
+    // 聽取 Esc 鍵中斷訊號
+    const keyHandler = (e) => {
+        if (e.key === 'Escape') {
+            stopRequested = true;
+            console.warn('[中斷提示] 收到 Esc 鍵訊號，當前筆數完成後將停止並匯出...');
+            updateStatusUI("正在手動中斷，完成當前筆數後匯出...");
+        }
+    };
+    window.addEventListener('keydown', keyHandler);
+
+    // 狀態 UI (固定於右上角)
+    let statusDiv = document.getElementById('ahk_status_div');
+    if (!statusDiv) {
+        statusDiv = document.createElement('div');
+        statusDiv.id = 'ahk_status_div';
+        statusDiv.style.cssText = 'position:fixed;top:10px;right:10px;z-index:999999;background:rgba(0,0,0,0.85);color:#fff;padding:12px 18px;border-radius:8px;font-size:14px;box-shadow:0 4px 6px rgba(0,0,0,0.3);font-family:sans-serif;line-height:1.5;';
+        document.body.appendChild(statusDiv);
+    }
+    const updateStatusUI = (msg) => {
+        statusDiv.innerHTML = `<div><b>背景查詢執行中</b></div><div>${msg}</div><div style="font-size:12px;color:#aaa;margin-top:4px;">(按下 Esc 鍵可隨時中斷並儲存)</div>`;
+    };
+
+    // 背景隱藏工作用的 iframe
+    let iframe = document.getElementById('ahk_background_frame');
+    if (!iframe) {
+        iframe = document.createElement('iframe');
+        iframe.id = 'ahk_background_frame';
+        iframe.style.cssText = 'position:fixed;bottom:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;';
+        document.body.appendChild(iframe);
+    }
+
+    // 人類隨機延遲
+    const humanDelay = (baseMs) => {
+        const jitter = Math.floor((Math.random() * 0.6 + 0.7) * baseMs);
+        return new Promise(resolve => setTimeout(resolve, jitter));
+    };
+
+    // 輪詢等待 DOM 元素出現
+    const waitForElement = (docGetter, predicate, timeoutMs = 6000) => {
+        return new Promise((resolve) => {
+            const start = Date.now();
+            const timer = setInterval(() => {
+                try {
+                    const doc = docGetter();
+                    if (doc) {
+                        const result = predicate(doc);
+                        if (result) {
+                            clearInterval(timer);
+                            return resolve(result);
+                        }
+                    }
+                } catch (e) {}
+                if (Date.now() - start > timeoutMs) {
+                    clearInterval(timer);
+                    resolve(null);
+                }
+            }, 300);
+        });
+    };
+
+    // 計算日期差 (傳回純數字)
+    const calculateDaysDiffNumber = (dateStr) => {
+        if (!dateStr || dateStr === "未查到" || dateStr === "查詢失敗") return "";
+
+        let cleanDateStr = dateStr.replace(/[^\d]/g, '');
+        if (cleanDateStr.length === 8) {
+            const y = cleanDateStr.substring(0, 4);
+            const m = cleanDateStr.substring(4, 6);
+            const d = cleanDateStr.substring(6, 8);
+
+            const targetDate = new Date(`${y}-${m}-${d}T00:00:00`);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            const diffTime = targetDate - today;
+            return Math.round(diffTime / (1000 * 60 * 60 * 24));
+        }
+        return "";
+    };
+
+    console.log(`[背景無彈窗模式] 開始處理，共 ${histnoList.length} 筆資料...`);
+    const results = [["病歷號", "預約掛號日期", "距離今天天數", "回診門診類別"]];
+    let nextCoolDownThreshold = Math.floor(Math.random() * 4) + 4;
+
+    for (let i = 0; i < histnoList.length; i++) {
+        if (stopRequested) break;
+
+        const histno = histnoList[i];
+        updateStatusUI(`[${i + 1}/${histnoList.length}] 背景處理中: <b>${histno}</b>`);
+        console.log(`[${i + 1}/${histnoList.length}] 背景查詢病歷號: ${histno}`);
+
+        let apptDate = "未查到";
+        let clinicType = "";
+
+        try {
+            // 1. 載入目標網址至背景隱藏 iframe
+            iframe.src = `https://web9.vghtpe.gov.tw/emr/qemr/qemr.cfm?action=findEmr&histno=${histno}#`;
+
+            // 2. 等待頁面載入並尋找「病患資料」按鈕
+            const patientLink = await waitForElement(
+                () => iframe.contentDocument || iframe.contentWindow.document,
+                (doc) => Array.from(doc.querySelectorAll('a')).find(el => el.textContent.includes('病患資料')),
+                6000
+            );
+
+            if (patientLink) {
+                patientLink.click();
+                await humanDelay(1500);
+            }
+
+            // 3. 等待並點擊「預約掛號」按鈕
+            const apptLink = await waitForElement(
+                () => iframe.contentDocument || iframe.contentWindow.document,
+                (doc) => Array.from(doc.querySelectorAll('a')).find(el => el.textContent.includes('預約掛號')),
+                6000
+            );
+
+            if (apptLink) {
+                apptLink.click();
+                await humanDelay(2000);
+            }
+
+            // 4. 等待結果資料加載
+            await humanDelay(1500);
+            const finalDoc = iframe.contentDocument || iframe.contentWindow.document;
+
+            // 5. 抓取預約日期 (8碼數字)
+            const cells = Array.from(finalDoc.querySelectorAll('td'));
+            const targetCell = cells.find(td => /^\d{8}$/.test(td.textContent.trim()));
+
+            if (targetCell) {
+                apptDate = targetCell.textContent.trim();
+            } else {
+                const match = finalDoc.body.innerText.match(/\b20\d{6}\b/);
+                if (match) apptDate = match[0];
+            }
+
+            // 6. 擷取「回診門診類別」XPath
+            try {
+                const clinicTypeXpath = '/html/body/table/tbody/tr/td[2]/div[2]/div[2]/div/table/tbody/tr/td[2]';
+                const typeResult = finalDoc.evaluate(clinicTypeXpath, finalDoc, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+                if (typeResult && typeResult.singleNodeValue) {
+                    clinicType = typeResult.singleNodeValue.textContent.trim();
+                }
+            } catch (typeErr) {
+                console.warn(`擷取回診門診類別 XPath 失敗 (${histno}):`, typeErr);
+            }
+
+        } catch (err) {
+            console.error(`處理 ${histno} 時發生錯誤:`, err);
+            apptDate = "查詢失敗";
+        }
+
+        const daysDiffNum = calculateDaysDiffNumber(apptDate);
+        results.push([histno, apptDate, daysDiffNum, clinicType]);
+
+        if (stopRequested) break;
+
+        // 防護冷卻機制
+        if ((i + 1) % nextCoolDownThreshold === 0 && (i + 1) < histnoList.length) {
+            const coolTime = Math.floor(Math.random() * 12000) + 12000;
+            updateStatusUI(`[背景冷卻] 已完成 ${i + 1} 筆，離席休息 ${Math.round(coolTime / 1000)} 秒...`);
+            await new Promise(resolve => setTimeout(resolve, coolTime));
+            nextCoolDownThreshold = (i + 1) + Math.floor(Math.random() * 4) + 4;
+        } else {
+            await humanDelay(2000);
+        }
+    }
+
+    // 清理 UI 與 iframe
+    window.removeEventListener('keydown', keyHandler);
+    if (statusDiv) statusDiv.remove();
+    if (iframe) iframe.remove();
+
+    // 匯出 CSV 檔
+    const successCount = results.length - 1;
+    const csvContent = "﻿" + results.map(row => row.map(val => `"${val}"`).join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "appointment_results.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    if (stopRequested) {
+        alert(`已手動停止！共成功處理 ${successCount} 筆資料，結果檔案已自動下載。`);
+    } else {
+        alert(`[背景模式] 批次查詢完畢！共處理 ${successCount} 筆資料，結果已下載。`);
+    }
+})();</script>
+
+<script>
+(() => {
+"use strict";
+/* ================= OCR 引擎（純前端、範本比對） ================= */
+const FW = 12, FH = 18;            // 特徵網格大小
+const ID_RE = /^\d{5,8}-\d$/;     // 病歷號格式
+const LS_KEY = 'hisocr_learned_v1';
+
+function lumOf(data, i){ return 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2]; }
+
+function otsu(lum){
+  const hist = new Array(256).fill(0);
+  for (const v of lum) hist[Math.max(0, Math.min(255, v|0))]++;
+  const total = lum.length; let sum = 0;
+  for (let i=0;i<256;i++) sum += i*hist[i];
+  let sumB=0, wB=0, best=0, th=128;
+  for (let t=0;t<256;t++){
+    wB += hist[t]; if (!wB) continue;
+    const wF = total - wB; if (!wF) break;
+    sumB += t*hist[t];
+    const mB = sumB/wB, mF = (sum-sumB)/wF;
+    const between = wB*wF*(mB-mF)*(mB-mF);
+    if (between > best){ best = between; th = t; }
+  }
+  return th;
+}
+
+// 從灰階裁切區塊抽取特徵向量（墨水濃度，平均歸一化）
+function featureFrom(ink, W, x0, y0, w, h){
+  const v = new Float32Array(FW*FH);
+  for (let gy=0; gy<FH; gy++){
+    const ya = y0 + gy*h/FH, yb = y0 + (gy+1)*h/FH;
+    for (let gx=0; gx<FW; gx++){
+      const xa = x0 + gx*w/FW, xb = x0 + (gx+1)*w/FW;
+      let s=0, a=0;
+      for (let y=Math.floor(ya); y<Math.ceil(yb); y++){
+        const wy = Math.min(yb, y+1) - Math.max(ya, y); if (wy<=0) continue;
+        for (let x=Math.floor(xa); x<Math.ceil(xb); x++){
+          const wx = Math.min(xb, x+1) - Math.max(xa, x); if (wx<=0) continue;
+          s += ink[y*W+x]*wx*wy; a += wx*wy;
+        }
+      }
+      v[gy*FW+gx] = a ? s/a : 0;
+    }
+  }
+  let m=0; for (const x of v) m+=x; m/=v.length;
+  let n=0; for (let i=0;i<v.length;i++){ v[i]-=m; n+=v[i]*v[i]; }
+  n = Math.sqrt(n)||1; for (let i=0;i<v.length;i++) v[i]/=n;
+  return v;
+}
+
+// 內建範本：用多種常見字型繪製 0-9
+const SIZES = [13,15,17,20,64];
+const FONTS = ['Calibri','新細明體','PMingLiU','MingLiU','Microsoft JhengHei','微軟正黑體','Arial','Segoe UI','Tahoma','Verdana','Times New Roman','Consolas','Courier New','Helvetica','PingFang TC','sans-serif','serif','monospace'];
+let BASE_T = [];
+function buildBaseTemplates(){
+  const c = document.createElement('canvas'); c.width = 80; c.height = 100;
+  const g = c.getContext('2d', {willReadFrequently:true});
+  const seen = new Set(); BASE_T = [];
+  for (const f of FONTS) for (const px of SIZES){
+    for (let d=0; d<10; d++){
+      g.fillStyle='#fff'; g.fillRect(0,0,80,100);
+      g.fillStyle='#000'; g.font = `${px}px "${f}"`; g.textBaseline='alphabetic';
+      g.fillText(String(d), 10, 80);
+      const im = g.getImageData(0,0,80,100).data;
+      const ink = new Float32Array(80*100);
+      let x0=80,y0=100,x1=-1,y1=-1;
+      for (let i=0;i<80*100;i++){
+        const L = lumOf(im, i*4); const k = Math.max(0,(200-L)/200); ink[i]=k;
+        if (L<128){ const x=i%80, y=(i/80)|0; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+      }
+      if (x1<0) continue;
+      const w=x1-x0+1, h=y1-y0+1;
+      if (h < 6) continue;
+      const vec = featureFrom(ink, 80, x0, y0, w, h);
+      const key = d+':'+Array.from(vec.slice(0,40), x=>x.toFixed(2)).join(',');
+      if (seen.has(key)) continue; seen.add(key);
+      BASE_T.push({ch:String(d), vec, aspect:w/h, learned:false});
+    }
+  }
+}
+
+let LEARNED = [];
+function loadLearned(){
+  try{ const raw = localStorage.getItem(LS_KEY); if(!raw) return;
+    LEARNED = JSON.parse(raw).map(t=>({ch:t.ch, aspect:t.a, vec:Float32Array.from(t.v), learned:true}));
+  }catch(e){ LEARNED = []; }
+}
+function saveLearned(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(LEARNED.slice(-1500).map(t=>({ch:t.ch,a:t.aspect,v:Array.from(t.vec,x=>+x.toFixed(3))})))); }catch(e){}
+}
+
+function classify(vec, aspect){
+  let best=null, bs=-9, second=-9;
+  const pool = LEARNED.length ? LEARNED.concat(BASE_T) : BASE_T;
+  const perCh = {};
+  for (const t of pool){
+    let dot=0; for (let i=0;i<vec.length;i++) dot += vec[i]*t.vec[i];
+    let s = dot - 0.6*Math.abs(Math.log((aspect+1e-3)/(t.aspect+1e-3)));
+    if (t.learned) s += 0.02;
+    if (!(t.ch in perCh) || s>perCh[t.ch]) perCh[t.ch]=s;
+  }
+  for (const ch in perCh){ const s=perCh[ch]; if (s>bs){ second=bs; bs=s; best=ch; } else if (s>second) second=s; }
+  return {ch:best, score:bs, margin:bs-second, all:perCh};
+}
+
+// 檢查碼：本體數字由右往左權重 1,2,3…，加總 mod 10（已用你清單中 68 筆病歷號驗證）
+function checksumOK(id){
+  const m = /^(\d+)-(\d)$/.exec(id); if (!m) return false;
+  const b = m[1]; let sum=0;
+  for (let i=0;i<b.length;i++) sum += (+b[i])*(b.length-i);
+  return sum % 10 === +m[2];
+}
+
+// 檢查碼不符時，找「字形代價最小」的單一數字更正
+function repairByChecksum(t){
+  const glyphs = t.chars.filter(c=>c.vec);
+  const fmt = (arr) => { const d = arr.join(''); return d.slice(0,-1)+'-'+d.slice(-1); };
+  const cur = glyphs.map(c=>c.ch);
+  if (cur.length < 6) return null;
+  let best=null;
+  glyphs.forEach((c,i)=>{
+    for (const alt in c.all){
+      if (alt===c.ch) continue;
+      const cost = c.all[c.ch]-c.all[alt];
+      if (best && cost>=best.cost) continue;
+      const trial = cur.slice(); trial[i]=alt;
+      if (checksumOK(fmt(trial))) best={cost, i, alt, text:fmt(trial)};
+    }
+  });
+  return best && best.cost < 0.45 ? best : null;
+}
+
+// 主流程：圖片 → 每一列的 token（含字元特徵）
+function recognize(img){
+  const W = img.naturalWidth, H = img.naturalHeight;
+  // 小圖放大，提升切字精度
+  const scale = H < 600 && W < 600 ? 2 : 1;
+  const cw = W*scale, ch = H*scale;
+  const c = document.createElement('canvas'); c.width=cw; c.height=ch;
+  const g = c.getContext('2d', {willReadFrequently:true});
+  g.fillStyle='#fff'; g.fillRect(0,0,cw,ch);
+  g.imageSmoothingEnabled = true; g.drawImage(img,0,0,cw,ch);
+  const data = g.getImageData(0,0,cw,ch).data;
+  const N = cw*ch, lum = new Uint8ClampedArray(N);
+  for (let i=0;i<N;i++) lum[i] = lumOf(data, i*4);
+  const T = Math.min(otsu(lum), 165);
+  const dark = new Uint8Array(N), ink = new Float32Array(N), light = new Uint8Array(N);
+  for (let i=0;i<N;i++){ if (lum[i] < T) dark[i]=1; if (lum[i] < Math.min(T+50, 215)) light[i]=1; ink[i] = Math.max(0, Math.min(1, (T+40-lum[i])/(T+40))); }
+
+  // 去除格線（橫跨大部分寬/高的線條）
+  for (let y=0;y<ch;y++){ let n=0; for (let x=0;x<cw;x++) n+=dark[y*cw+x]; if (n > cw*0.55) for (let x=0;x<cw;x++){ dark[y*cw+x]=0; ink[y*cw+x]=0; light[y*cw+x]=0; } }
+  for (let x=0;x<cw;x++){ let n=0; for (let y=0;y<ch;y++) n+=dark[y*cw+x]; if (n > ch*0.55) for (let y=0;y<ch;y++){ dark[y*cw+x]=0; ink[y*cw+x]=0; light[y*cw+x]=0; } }
+
+  // 找文字列（水平投影）
+  const rowSum = new Int32Array(ch);
+  for (let y=0;y<ch;y++){ let n=0; for (let x=0;x<cw;x++) n+=dark[y*cw+x]; rowSum[y]=n; }
+  const bands=[]; let s=-1;
+  for (let y=0;y<=ch;y++){
+    const on = y<ch && rowSum[y]>0;
+    if (on && s<0) s=y;
+    if (!on && s>=0){ bands.push([s,y-1]); s=-1; }
+  }
+  const hs = bands.map(b=>b[1]-b[0]+1).sort((a,b)=>a-b);
+  const medH = hs.length ? hs[Math.floor(hs.length*0.6)] : 0;
+  const lines = [];
+  for (const [y0,y1] of bands){
+    const bh = y1-y0+1;
+    if (bh < Math.max(5*scale, medH*0.45)) continue;   // 雜訊或殘線
+    lines.push(segmentLine(dark, ink, light, cw, y0, y1, scale));
+  }
+  return {lines: lines.filter(l=>l.tokens.length), canvas:c, scale};
+}
+
+function segmentLine(dark, ink, light, W, y0, y1, scale){
+  const bh = y1-y0+1;
+  const col = new Int32Array(W);
+  for (let x=0;x<W;x++){ let n=0; for (let y=y0;y<=y1;y++) n+=dark[y*W+x]; col[x]=n; }
+  let segs=[]; let s=-1;
+  for (let x=0;x<=W;x++){
+    const on = x<W && col[x]>0;
+    if (on && s<0) s=x;
+    if (!on && s>=0){ segs.push({x0:s,x1:x-1}); s=-1; }
+  }
+  // 每段取緊密 y 範圍
+  for (const sg of segs){
+    let a=y1, b=y0;
+    for (let y=y0;y<=y1;y++) for (let x=sg.x0;x<=sg.x1;x++) if (dark[y*W+x]){ if(y<a)a=y; if(y>b)b=y; }
+    sg.y0=a; sg.y1=b; sg.w=sg.x1-sg.x0+1; sg.h=b-a+1;
+  }
+  segs = segs.filter(sg => sg.h>=1 && !(sg.w<=1*scale && sg.h<=1*scale));
+  const tall = segs.filter(sg=>sg.h > bh*0.65).map(sg=>sg.w).sort((a,b)=>a-b);
+  let dw = tall.length ? tall[Math.floor(tall.length/2)] : bh*0.55;
+  // 若中位數本身就是黏字，以高度估算
+  dw = Math.min(dw, bh*0.75);
+  const tight = (piece) => {
+    let a=y1,b=y0; for (let y=y0;y<=y1;y++) for (let x=piece.x0;x<=piece.x1;x++) if (dark[y*W+x]){ if(y<a)a=y; if(y>b)b=y; }
+    if (b<a) return null; piece.y0=a; piece.y1=b; piece.w=piece.x1-piece.x0+1; piece.h=b-a+1; return piece;
+  };
+  // 細筆畫（如襯線字的 0）可能被切成兩半：淺色像素相連且合併後寬度合理時併回
+  {
+    const lightCol = (x)=>{ for (let y=y0;y<=y1;y++) if (light[y*W+x]) return true; return false; };
+    const merged=[];
+    for (const sg of segs){
+      const prev = merged[merged.length-1];
+      if (prev && prev.h > bh*0.35 && sg.h > bh*0.35 && (sg.x1-prev.x0+1) <= dw*1.2 && Math.min(prev.w, sg.w) < dw*0.55){
+        let joined = true; for (let x=prev.x1+1; x<sg.x0; x++) if (!lightCol(x)){ joined=false; break; }
+        if (joined){ prev.x1 = sg.x1; tight(prev); continue; }
+      }
+      merged.push(sg);
+    }
+    segs = merged;
+  }
+  // 「-」常與相鄰數字黏在一起：從段落兩端剝離只落在中間帶的細橫線
+  const dashCol = (x) => {
+    let n=0, lo=1e9, hi=-1;
+    for (let y=y0;y<=y1;y++) if (dark[y*W+x]){ n++; if(y<lo)lo=y; if(y>hi)hi=y; }
+    if (!n) return false;
+    return (hi-lo+1) <= Math.max(2*scale, bh*0.22) && lo >= y0+bh*0.25 && hi <= y0+bh*0.8;
+  };
+  const peeled=[];
+  for (const sg of segs){
+    if (sg.h <= bh*0.65){ peeled.push(sg); continue; }
+    let L = sg.x0; while (L<=sg.x1 && dashCol(L)) L++;
+    let R = sg.x1; while (R>=L && dashCol(R)) R--;
+    const minDash = Math.max(2*scale, Math.round(dw*0.4)), minRest = dw*0.35;
+    const parts=[];
+    if (L-sg.x0 >= minDash && R-L+1 >= minRest) parts.push({x0:sg.x0,x1:L-1}); else L = sg.x0;
+    const rightDash = sg.x1-R >= minDash && R-L+1 >= minRest;
+    parts.push({x0:L, x1: rightDash ? R : sg.x1});
+    if (rightDash) parts.push({x0:R+1, x1:sg.x1});
+    for (const p of parts){ const t = tight(p); if (t) peeled.push(t); }
+  }
+  segs = peeled;
+  // 拆開黏在一起的字
+  const out=[];
+  for (const sg of segs){
+    if (sg.h > bh*0.65 && sg.w > dw*1.55){
+      const n = Math.max(2, Math.round(sg.w/dw));
+      let prev = sg.x0;
+      for (let k=1;k<=n;k++){
+        let cut;
+        if (k===n) cut = sg.x1+1;
+        else {
+          const ideal = Math.round(sg.x0 + sg.w*k/n); let bestX=ideal, bv=1e9;
+          for (let x=ideal-Math.round(dw*0.3); x<=ideal+Math.round(dw*0.3); x++){ if (x<=prev||x>=sg.x1) continue; if (col[x]<bv){bv=col[x];bestX=x;} }
+          cut = bestX;
+        }
+        const piece = {x0:prev, x1:cut-1};
+        let a=y1,b=y0; for (let y=y0;y<=y1;y++) for (let x=piece.x0;x<=piece.x1;x++) if (dark[y*W+x]){ if(y<a)a=y; if(y>b)b=y; }
+        if (b>=a){ piece.y0=a; piece.y1=b; piece.w=piece.x1-piece.x0+1; piece.h=b-a+1; out.push(piece); }
+        prev = cut;
+      }
+    } else out.push(sg);
+  }
+  // 分類 + 依大間隔切成多個 token
+  const tokens=[]; let cur=null, lastX=-1e9;
+  for (const sg of out){
+    const gap = sg.x0 - lastX;
+    if (!cur || gap > dw*1.6){ cur = {chars:[]}; tokens.push(cur); }
+    lastX = sg.x1;
+    let glyph;
+    if (sg.h <= bh*0.35){
+      if (sg.w >= sg.h*1.3 && sg.w >= 2*scale) glyph = {ch:'-', score:1, margin:1};
+      else continue; // 小點雜訊
+    } else {
+      const vec = featureFrom(ink, W, sg.x0, sg.y0, sg.w, sg.h);
+      const r = classify(vec, sg.w/sg.h);
+      glyph = {ch:r.ch, score:r.score, margin:r.margin, all:r.all, vec, aspect:sg.w/sg.h};
+    }
+    glyph.box = sg;
+    cur.chars.push(glyph);
+  }
+  for (const t of tokens){
+    // 病歷號的「-」一定在最後一碼前：多出的橫線（多半是 4 的橫筆被誤切）一律丟掉
+    if (t.chars.filter(c=>c.ch==='-').length > 1 || (t.chars.some(c=>c.ch==='-') && t.chars[t.chars.length-2]?.ch !== '-'))
+      t.chars = t.chars.filter(c=>c.ch!=='-');
+    t.text = t.chars.map(c=>c.ch).join('');
+    // 抓不到「-」但位數符合時，自動補上
+    if (/^\d{6,9}$/.test(t.text)) t.fixed = t.text.slice(0,-1)+'-'+t.text.slice(-1);
+    t.conf = Math.min(...t.chars.filter(c=>c.vec).map(c=>c.margin), 1);
+    const out = t.fixed || t.text;
+    t.bodyLen = (out.split('-')[0]||'').length;
+  }
+  return {y0, y1, tokens: tokens.filter(t=>t.chars.length>=3 || /\d/.test(t.text) && t.chars.length>=2)};
+}
+
+// 以整張圖最常見的位數為準：位數異常的不自動更正（避免改成「看似正確」的錯號）
+function finalizeTokens(tokens){
+  const cnt={}; tokens.forEach(t=>{ cnt[t.bodyLen]=(cnt[t.bodyLen]||0)+1; });
+  const major = +Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0];
+  for (const t of tokens){
+    t.oddLen = tokens.length>=3 && t.bodyLen !== major;
+    const out = t.fixed || t.text;
+    if (!t.oddLen && ID_RE.test(out) && !checksumOK(out)){
+      const r = repairByChecksum(t);
+      if (r){ t.chars.filter(c=>c.vec)[r.i].ch = r.alt; t.chars.filter(c=>c.vec)[r.i].repaired = true;
+        t.text = t.chars.map(c=>c.ch).join(''); t.fixed = /^\d{6,9}$/.test(t.text) ? r.text : null; t.repaired = true; }
+    }
+    t.unsure = t.chars.filter(c=>c.vec && !c.repaired && c.margin < 0.03).length > 0;
+  }
+}
+
+/* ================= UI ================= */
+const $ = id => document.getElementById(id);
+const items = [];   // {id, name, img, canvas, tokens, textarea}
+let seq = 0;
+
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),1800); }
+
+function addImageBlob(blob){
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.onload = () => { processImage(img); };
+  img.onerror = () => toast('無法讀取這張圖片');
+  img.src = url;
+}
+
+function processImage(img){
+  const id = ++seq;
+  const res = recognize(img);
+  const tokens = [];
+  for (const l of res.lines) for (const t of l.tokens) tokens.push(t);
+  finalizeTokens(tokens);
+  const item = {id, img, tokens, res};
+  items.push(item);
+  renderItem(item);
+  regenerate();
+}
+
+function tokenOutput(t){ return t.fixed || t.text; }
+
+function renderItem(item){
+  if ($('list').querySelector('.empty')) $('list').innerHTML='';
+  const wrap = document.createElement('div'); wrap.className='img-item';
+  const idx = items.indexOf(item)+1;
+  wrap.innerHTML = `
+    <div class="img-head"><span class="t">第 ${idx} 張圖片</span><span class="info"></span>
+      <button class="small" data-act="learn">用此結果校正辨識</button>
+      <button class="small" data-act="del">刪除</button></div>
+    <div class="img-body"><div class="pic"></div><div><textarea class="ids" spellcheck="false"></textarea><div class="flags"></div></div></div>`;
+  // 預覽：原圖上框出辨識到的字
+  const pv = document.createElement('canvas');
+  const sc = item.res.scale;
+  pv.width = item.img.naturalWidth*sc; pv.height = item.img.naturalHeight*sc;
+  const g = pv.getContext('2d'); g.drawImage(item.img,0,0,pv.width,pv.height);
+  for (const t of item.tokens){
+    for (const c of t.chars){
+      const low = c.repaired || (c.vec && c.margin < 0.03);
+      g.strokeStyle = low ? 'rgba(220,90,0,.95)' : 'rgba(15,110,92,.55)';
+      g.lineWidth = low ? 2 : 1;
+      g.strokeRect(c.box.x0-0.5, c.box.y0-0.5, c.box.w+1, c.box.h+1);
+    }
+  }
+  pv.style.width = (item.img.naturalWidth) + 'px';
+  wrap.querySelector('.pic').appendChild(pv);
+  const ta = wrap.querySelector('textarea');
+  ta.value = item.tokens.map(tokenOutput).join('\n');
+  ta.rows = Math.max(8, item.tokens.length+1);
+  item.textarea = ta; item.el = wrap;
+  ta.addEventListener('input', ()=>{ updateFlags(item); regenerate(); });
+  wrap.querySelector('[data-act=del]').onclick = () => {
+    items.splice(items.indexOf(item),1); wrap.remove(); relabel(); regenerate();
+    if (!items.length) $('list').innerHTML='<div class="empty">尚未加入圖片。</div>';
+  };
+  wrap.querySelector('[data-act=learn]').onclick = () => learnFrom(item);
+  $('list').appendChild(wrap);
+  updateFlags(item);
+}
+
+function relabel(){ items.forEach((it,i)=> it.el.querySelector('.t').textContent = `第 ${i+1} 張圖片`); }
+
+function updateFlags(item){
+  const lines = item.textarea.value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const bad = lines.filter(s=>!ID_RE.test(s));
+  const badSum = lines.filter(s=>ID_RE.test(s) && !checksumOK(s));
+  const fixed = [], low = [], odd = [];
+  item.tokens.forEach((t,i)=>{
+    if (lines[i] !== tokenOutput(t)) return;           // 使用者已改過就不提示
+    if (t.oddLen) odd.push(lines[i]);
+    else if (t.repaired) fixed.push(lines[i]);
+    else if (t.unsure) low.push(lines[i]);
+  });
+  item.el.querySelector('.info').textContent = `${lines.length} 筆`;
+  let html='';
+  if (bad.length) html += `<div>格式不符：${bad.map(s=>`<span class="pill bad">${esc(s)}</span>`).join('')}</div>`;
+  if (badSum.length) html += `<div>檢查碼不符（多半是某位數字認錯）：${badSum.map(s=>`<span class="pill bad">${esc(s)}</span>`).join('')}</div>`;
+  if (odd.length) html += `<div>位數與多數不同（真的是短碼就沒問題，否則可能漏字）：${odd.map(s=>`<span class="pill warn">${esc(s)}</span>`).join('')}</div>`;
+  if (low.length) html += `<div>字形較不確定，建議看一眼（圖上橘框）：${low.map(s=>`<span class="pill warn">${esc(s)}</span>`).join('')}</div>`;
+  if (fixed.length) html += `<div>已依檢查碼自動更正，請對照圖片確認（圖上橘框）：${fixed.map(s=>`<span class="pill warn">${esc(s)}</span>`).join('')}</div>`;
+  if (!html) html = `<span class="ok">✓ 全部 ${lines.length} 筆格式與檢查碼皆正確</span>`;
+  item.el.querySelector('.flags').innerHTML = html;
+}
+
+function learnFrom(item){
+  const lines = item.textarea.value.split('\n').map(s=>s.trim()).filter(Boolean);
+  if (lines.length !== item.tokens.length){ toast(`列數不同（文字 ${lines.length} 列／圖中 ${item.tokens.length} 個），請保持一行對應一個病歷號`); return; }
+  let added=0, skipped=0;
+  lines.forEach((line,i)=>{
+    const t = item.tokens[i];
+    const digitsCorrect = line.replace(/-/g,''), glyphs = t.chars.filter(c=>c.vec);
+    if (digitsCorrect.length !== glyphs.length){ skipped++; return; }
+    glyphs.forEach((c,k)=>{
+      const want = digitsCorrect[k];
+      if (!/\d/.test(want)) return;
+      // 每個字形都學（同一字型的 3/8 等相近字才分得開），近乎相同的就不重複存
+      const dup = LEARNED.some(L => { if (L.ch!==want) return false; let d=0; for (let k=0;k<c.vec.length;k++) d+=L.vec[k]*c.vec[k]; return d>0.995; });
+      if (!dup){ LEARNED.push({ch:want, vec:c.vec, aspect:c.aspect, learned:true}); added++; }
+      c.ch = want;
+    });
+    t.text = t.chars.map(c=>c.ch).join(''); t.fixed = null;
+  });
+  saveLearned();
+  toast(added ? `已學習 ${added} 個字形${skipped?`（${skipped} 列位數不同已略過）`:''}` : (skipped?`${skipped} 列位數與圖中不同，無法對應`:'辨識結果已一致，不需要校正'));
+}
+
+function esc(s){ return s.replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function collect(){
+  const dedupe = $('optDedupe').checked, skipBad = $('optSkipBad').checked;
+  const seen = new Set(); const groups=[]; let dupCount=0, badCount=0, total=0;
+  items.forEach((it,i)=>{
+    const ids=[];
+    for (let s of it.textarea.value.split('\n')){
+      s = s.trim().replace(/[–—－]/g,'-').replace(/\s+/g,'');
+      if (!s) continue;
+      const bad = !ID_RE.test(s) || !checksumOK(s);
+      if (bad) badCount++;
+      if (bad && skipBad) continue;
+      if (dedupe && seen.has(s)){ dupCount++; continue; }
+      seen.add(s); ids.push(s); total++;
+    }
+    groups.push({label:`第${i+1}張圖片`, ids});
+  });
+  return {groups, total, dupCount, badCount};
+}
+
+function buildArrayBody(groups, withComments){
+  const out=[]; const nonEmpty = groups.filter(g=>g.ids.length);
+  nonEmpty.forEach((g,gi)=>{
+    if (withComments){ if (gi) out.push(''); out.push(`        // --- ${g.label} ---`); }
+    for (let i=0;i<g.ids.length;i+=5){
+      const chunk = g.ids.slice(i,i+5).map(s=>`"${s}"`).join(', ');
+      const isLast = gi===nonEmpty.length-1 && i+5>=g.ids.length;
+      out.push(`        ${chunk}${isLast?'':','}`);
+    }
+  });
+  return out.join('\n');
+}
+
+const LIST_RE = /(const|let|var)\s+histnoList\s*=\s*\[[\s\S]*?\];/;
+function regenerate(){
+  const {groups,total,dupCount,badCount} = collect();
+  const body = buildArrayBody(groups, $('optGroup').checked);
+  const tpl = $('tpl').value;
+  const replacement = `const histnoList = [\n${body}\n    ];`;
+  let code;
+  if (LIST_RE.test(tpl)){ code = tpl.replace(LIST_RE, ()=>replacement); $('tplState').textContent=''; }
+  else { code = `// ⚠ 範本中找不到 const histnoList = [ ... ];，以下只輸出清單\n${replacement}`; $('tplState').textContent='⚠ 範本中找不到 histnoList 陣列'; }
+  $('code').value = code;
+  if (!items.length){ $('summary').textContent='尚無資料'; return; }
+  let s = `共 <b>${total}</b> 筆`;
+  if (dupCount) s += `，已移除重複 ${dupCount} 筆`;
+  if (badCount) s += `，<span style="color:var(--bad)">${badCount} 筆格式或檢查碼不符${$('optSkipBad').checked?'（已略過）':'（仍保留，請檢查）'}</span>`;
+  $('summary').innerHTML = s;
+}
+
+async function copyText(text, msg){
+  try { await navigator.clipboard.writeText(text); toast(msg); }
+  catch(e){ const ta=$('code'); ta.focus(); ta.select(); try{ document.execCommand('copy'); toast(msg);}catch(_){ toast('請手動 Ctrl+C 複製'); } }
+}
+
+/* ---- 事件 ---- */
+function handleFiles(list){ for (const f of list) if (f.type && f.type.startsWith('image/')) addImageBlob(f); }
+document.addEventListener('paste', e => {
+  if (e.target && e.target.tagName==='TEXTAREA') return; // 在文字框內正常貼上文字
+  const its = e.clipboardData && e.clipboardData.items; if (!its) return;
+  let got=false;
+  for (const it of its){ if (it.type.startsWith('image/')){ const f=it.getAsFile(); if(f){ addImageBlob(f); got=true; } } }
+  if (got) e.preventDefault(); else toast('剪貼簿裡沒有圖片');
+});
+const drop = $('drop');
+drop.addEventListener('click', e => { if (e.target.id==='pick') $('file').click(); else drop.focus(); });
+$('file').addEventListener('change', e => { handleFiles(e.target.files); e.target.value=''; });
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.remove('over');}));
+drop.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+['optDedupe','optGroup','optSkipBad'].forEach(id=>$(id).addEventListener('change', regenerate));
+$('copy').onclick = () => copyText($('code').value, '已複製完整程式碼');
+$('copyList').onclick = () => { const {groups}=collect(); copyText(groups.flatMap(g=>g.ids).join('\n'), '已複製病歷號清單'); };
+$('clearAll').onclick = () => { items.length=0; $('list').innerHTML='<div class="empty">尚未加入圖片。</div>'; regenerate(); };
+
+const DEFAULT_TPL = $('defaultTpl').textContent;
+function loadTpl(){ let t=null; try{ t=localStorage.getItem('hisocr_tpl'); }catch(e){} $('tpl').value = t || DEFAULT_TPL; }
+$('tpl').addEventListener('input', ()=>{ try{ localStorage.setItem('hisocr_tpl', $('tpl').value); }catch(e){} regenerate(); });
+$('tplReset').onclick = () => { $('tpl').value = DEFAULT_TPL; try{ localStorage.removeItem('hisocr_tpl'); }catch(e){} regenerate(); toast('已還原預設範本'); };
+
+// 測試用掛鉤
+window.__hisocr = { recognize, addImageBlob, items };
+
+const start = () => { buildBaseTemplates(); loadLearned(); loadTpl(); regenerate(); drop.focus(); };
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(start); else start();
+})();
+</script>
+</body>
+</html>
