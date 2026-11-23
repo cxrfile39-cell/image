@@ -64,7 +64,7 @@
 </head>
 <body>
 <header>
-  <h1>病歷號截圖 → 批次查詢腳本</h1>
+  <h1>病歷號截圖 → 批次查詢腳本 <span style="font-size:12px;font-weight:400;color:var(--muted)">v4（2026-11-23）</span></h1>
   <div class="sub">貼上病歷號欄位截圖，自動辨識並產生可直接貼進 Console 的程式碼。辨識完全在你的瀏覽器內進行，圖片不會上傳。</div>
 </header>
 <main>
@@ -459,7 +459,7 @@ function recognize(img, v = {}){
   const data = g.getImageData(0,0,cw,ch).data;
   const N = cw*ch, lum = new Uint8ClampedArray(N);
   for (let i=0;i<N;i++) lum[i] = lumOf(data, i*4);
-  const T = v.fixed || Math.min(otsu(lum), v.cap || 165);
+  const T = v.fixed || Math.max(60, Math.min(otsu(lum) + 1, v.cap || 165));  // +1：Otsu 回傳的是「暗類」上界；純黑白截圖時否則門檻會變 0
   const dark = new Uint8Array(N), ink = new Float32Array(N), light = new Uint8Array(N);
   for (let i=0;i<N;i++){ if (lum[i] < T) dark[i]=1; if (lum[i] < Math.min(T+50, 215)) light[i]=1; ink[i] = Math.max(0, Math.min(1, (T+40-lum[i])/(T+40))); }
 
