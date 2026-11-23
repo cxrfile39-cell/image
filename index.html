@@ -461,9 +461,26 @@ function recognize(img){
   const dark = new Uint8Array(N), ink = new Float32Array(N), light = new Uint8Array(N);
   for (let i=0;i<N;i++){ if (lum[i] < T) dark[i]=1; if (lum[i] < Math.min(T+50, 215)) light[i]=1; ink[i] = Math.max(0, Math.min(1, (T+40-lum[i])/(T+40))); }
 
-  // 去除格線（橫跨大部分寬/高的線條）
-  for (let y=0;y<ch;y++){ let n=0; for (let x=0;x<cw;x++) n+=dark[y*cw+x]; if (n > cw*0.55) for (let x=0;x<cw;x++){ dark[y*cw+x]=0; ink[y*cw+x]=0; light[y*cw+x]=0; } }
-  for (let x=0;x<cw;x++){ let n=0; for (let y=0;y<ch;y++) n+=dark[y*cw+x]; if (n > ch*0.55) for (let y=0;y<ch;y++){ dark[y*cw+x]=0; ink[y*cw+x]=0; light[y*cw+x]=0; } }
+  // 去除格線：先移除橫跨整列的橫線，再移除「長」或「上下都碰到橫線」的直線段
+  //（Excel 有底色的儲存格會蓋掉格線，所以直線常常只出現在部分列）
+  const clr = (i) => { dark[i]=0; ink[i]=0; light[i]=0; };
+  const removedRow = new Uint8Array(ch), removedCol = new Uint8Array(cw);
+  for (let y=0;y<ch;y++){ let n=0; for (let x=0;x<cw;x++) n+=dark[y*cw+x]; if (n > cw*0.55){ removedRow[y]=1; for (let x=0;x<cw;x++) clr(y*cw+x); } }
+  const nearRemoved = (y) => { for (let d=-2*scale; d<=2*scale; d++){ const yy=y+d; if (yy<0||yy>=ch) return true; if (removedRow[yy]) return true; } return false; };
+  for (let x=0;x<cw;x++){
+    let y=0;
+    while (y<ch){
+      if (!dark[y*cw+x]){ y++; continue; }
+      let a=y; while (y<ch && dark[y*cw+x]) y++; const b=y-1, len=b-a+1;
+      if (len > ch*0.5 || (len > 6*scale && nearRemoved(a-1) && nearRemoved(b+1))){
+        for (let yy=a; yy<=b; yy++) clr(yy*cw+x); removedCol[x]=1;
+      }
+    }
+  }
+  // 清掉直線旁殘留的反鋸齒淺色像素
+  for (let x=0;x<cw;x++) if (removedCol[x]) for (const nx of [x-1,x+1]) if (nx>=0 && nx<cw && !removedCol[nx]){
+    let n=0; for (let y=0;y<ch;y++) n+=dark[y*cw+nx]; if (n > ch*0.5) for (let y=0;y<ch;y++) clr(y*cw+nx);
+  }
 
   // 找文字列（水平投影）
   const rowSum = new Int32Array(ch);
@@ -631,7 +648,9 @@ function addImageBlob(blob){
 
 function processImage(img){
   const id = ++seq;
-  const res = recognize(img);
+  let res;
+  try { res = recognize(img); }
+  catch(err){ console.error(err); res = {lines:[], scale:1}; toast('這張圖辨識時發生錯誤，請手動輸入或換一張截圖'); }
   const tokens = [];
   for (const l of res.lines) for (const t of l.tokens) tokens.push(t);
   finalizeTokens(tokens);
@@ -786,11 +805,12 @@ async function copyText(text, msg){
 /* ---- 事件 ---- */
 function handleFiles(list){ for (const f of list) if (f.type && f.type.startsWith('image/')) addImageBlob(f); }
 document.addEventListener('paste', e => {
-  if (e.target && e.target.tagName==='TEXTAREA') return; // 在文字框內正常貼上文字
   const its = e.clipboardData && e.clipboardData.items; if (!its) return;
   let got=false;
   for (const it of its){ if (it.type.startsWith('image/')){ const f=it.getAsFile(); if(f){ addImageBlob(f); got=true; } } }
-  if (got) e.preventDefault(); else toast('剪貼簿裡沒有圖片');
+  if (got){ e.preventDefault(); return; }
+  if (e.target && e.target.tagName==='TEXTAREA') return; // 文字照常貼進文字框
+  toast('剪貼簿裡沒有圖片');
 });
 const drop = $('drop');
 drop.addEventListener('click', e => { if (e.target.id==='pick') $('file').click(); else drop.focus(); });
