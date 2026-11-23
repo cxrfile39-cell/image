@@ -49,7 +49,8 @@
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .opts{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;font-size:13px}
   .opts label{display:flex;align-items:center;gap:5px;cursor:pointer}
-  #code{min-height:360px;font-size:12px;white-space:pre}
+  #code{min-height:360px;font-size:12px;white-space:pre;transition:background .4s}
+  #code.flash{background:var(--accent-soft)}
   .summary{font-size:13px;color:var(--muted);margin:8px 0}
   .summary b{color:var(--ink)}
   details{margin-top:14px}
@@ -89,6 +90,7 @@
       </div>
       <div class="summary" id="summary">尚無資料</div>
       <div class="row" style="margin-bottom:8px">
+        <button class="primary" id="insert">⬇ 插入病歷號至程式碼</button>
         <button class="primary" id="copy">複製程式碼</button>
         <button id="copyList">只複製清單</button>
         <button id="clearAll">清除全部圖片</button>
@@ -819,6 +821,13 @@ $('file').addEventListener('change', e => { handleFiles(e.target.files); e.targe
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.remove('over');}));
 drop.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
 ['optDedupe','optGroup','optSkipBad'].forEach(id=>$(id).addEventListener('change', regenerate));
+$('insert').onclick = () => {
+  regenerate();
+  const {total} = collect();
+  const c = $('code'); c.classList.add('flash'); setTimeout(()=>c.classList.remove('flash'), 600);
+  const i = c.value.indexOf('histnoList'); if (i>=0){ c.focus(); c.setSelectionRange(i,i); c.scrollTop = 0; }
+  toast(total ? `已插入 ${total} 筆病歷號` : '還沒有辨識到病歷號，請先貼上截圖');
+};
 $('copy').onclick = () => copyText($('code').value, '已複製完整程式碼');
 $('copyList').onclick = () => { const {groups}=collect(); copyText(groups.flatMap(g=>g.ids).join('\n'), '已複製病歷號清單'); };
 $('clearAll').onclick = () => { items.length=0; $('list').innerHTML='<div class="empty">尚未加入圖片。</div>'; regenerate(); };
