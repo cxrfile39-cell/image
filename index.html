@@ -447,10 +447,10 @@ function repairByChecksum(t){
 }
 
 // 主流程：圖片 → 每一列的 token（含字元特徵）
-function recognize(img){
+function recognize(img, v = {}){
   const W = img.naturalWidth, H = img.naturalHeight;
   // 小圖放大，提升切字精度
-  const scale = H < 600 && W < 600 ? 2 : 1;
+  const scale = v.scale || (H < 600 && W < 600 ? 2 : 1);
   const cw = W*scale, ch = H*scale;
   const c = document.createElement('canvas'); c.width=cw; c.height=ch;
   const g = c.getContext('2d', {willReadFrequently:true});
@@ -459,7 +459,7 @@ function recognize(img){
   const data = g.getImageData(0,0,cw,ch).data;
   const N = cw*ch, lum = new Uint8ClampedArray(N);
   for (let i=0;i<N;i++) lum[i] = lumOf(data, i*4);
-  const T = Math.min(otsu(lum), 165);
+  const T = v.fixed || Math.min(otsu(lum), v.cap || 165);
   const dark = new Uint8Array(N), ink = new Float32Array(N), light = new Uint8Array(N);
   for (let i=0;i<N;i++){ if (lum[i] < T) dark[i]=1; if (lum[i] < Math.min(T+50, 215)) light[i]=1; ink[i] = Math.max(0, Math.min(1, (T+40-lum[i])/(T+40))); }
 
@@ -501,7 +501,7 @@ function recognize(img){
     if (bh < Math.max(5*scale, medH*0.45)) continue;   // 雜訊或殘線
     lines.push(segmentLine(dark, ink, light, cw, y0, y1, scale));
   }
-  return {lines: lines.filter(l=>l.tokens.length), canvas:c, scale};
+  return {lines: lines.filter(l=>l.tokens.length), canvas:c, scale, debug:{W, H, T, bands:bands.length, lines:lines.length}};
 }
 
 function segmentLine(dark, ink, light, W, y0, y1, scale){
@@ -605,7 +605,7 @@ function segmentLine(dark, ink, light, W, y0, y1, scale){
   }
   for (const t of tokens){
     // 病歷號的「-」一定在最後一碼前：多出的橫線（多半是 4 的橫筆被誤切）一律丟掉
-    if (t.chars.filter(c=>c.ch==='-').length > 1 || (t.chars.some(c=>c.ch==='-') && t.chars[t.chars.length-2]?.ch !== '-'))
+    if (t.chars.filter(c=>c.ch==='-').length > 1 || (t.chars.some(c=>c.ch==='-') && (t.chars[t.chars.length-2]||{}).ch !== '-'))
       t.chars = t.chars.filter(c=>c.ch!=='-');
     t.text = t.chars.map(c=>c.ch).join('');
     // 抓不到「-」但位數符合時，自動補上
@@ -640,23 +640,38 @@ let seq = 0;
 
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),1800); }
 
-function addImageBlob(blob){
+function addImageBlob(blob, presetIds){
   const url = URL.createObjectURL(blob);
   const img = new Image();
-  img.onload = () => { processImage(img); };
+  img.onload = () => { processImage(img, presetIds); };
   img.onerror = () => toast('無法讀取這張圖片');
   img.src = url;
 }
 
-function processImage(img){
+// 依序嘗試多組參數，取「檢查碼正確筆數」最多的結果
+const VARIANTS = [{}, {cap:255}, {fixed:200}, {fixed:120}, {scale:2}, {scale:2, fixed:200}, {scale:1}];
+function processImage(img, presetIds){
   const id = ++seq;
-  let res;
-  try { res = recognize(img); }
-  catch(err){ console.error(err); res = {lines:[], scale:1}; toast('這張圖辨識時發生錯誤，請手動輸入或換一張截圖'); }
-  const tokens = [];
-  for (const l of res.lines) for (const t of l.tokens) tokens.push(t);
-  finalizeTokens(tokens);
-  const item = {id, img, tokens, res};
+  if (presetIds){   // 從 Excel 複製時剪貼簿裡就有文字，直接用，不必辨識
+    const tokens = presetIds.map(s=>({text:s, chars:[], fromText:true}));
+    const item = {id, img, tokens, res:{lines:[], scale:1}, fromText:true};
+    items.push(item); renderItem(item); regenerate(); return;
+  }
+  let best=null;
+  for (const v of VARIANTS){
+    if (v.scale===2 && img.naturalHeight*2*img.naturalWidth*2 > 25e6) continue;
+    let res;
+    try { res = recognize(img, v); } catch(err){ console.error(err); continue; }
+    const tokens = [];
+    for (const l of res.lines) for (const t of l.tokens) tokens.push(t);
+    if (tokens.length) finalizeTokens(tokens);
+    const good = tokens.filter(t=>checksumOK(tokenOutput(t)) && !t.repaired).length;
+    const score = good*3 + tokens.filter(t=>ID_RE.test(tokenOutput(t))).length;
+    if (!best || score > best.score) best = {res, tokens, score};
+    if (tokens.length >= 1 && good === tokens.length) break;   // 全部正確就不再試
+  }
+  if (!best){ best = {res:{lines:[], scale:1, debug:{}}, tokens:[]}; toast('這張圖辨識時發生錯誤，請手動輸入或換一張截圖'); }
+  const item = {id, img, tokens:best.tokens, res:best.res};
   items.push(item);
   renderItem(item);
   regenerate();
@@ -673,6 +688,8 @@ function renderItem(item){
       <button class="small" data-act="learn">用此結果校正辨識</button>
       <button class="small" data-act="del">刪除</button></div>
     <div class="img-body"><div class="pic"></div><div><textarea class="ids" spellcheck="false"></textarea><div class="flags"></div></div></div>`;
+  if (item.fromText){ wrap.querySelector('[data-act=learn]').remove(); wrap.querySelector('.t').insertAdjacentHTML('afterend','<span style="font-size:12px;color:var(--accent)">（直接讀取 Excel 文字）</span>'); }
+  if (item.img){
   // 預覽：原圖上框出辨識到的字
   const pv = document.createElement('canvas');
   const sc = item.res.scale;
@@ -688,6 +705,7 @@ function renderItem(item){
   }
   pv.style.width = (item.img.naturalWidth) + 'px';
   wrap.querySelector('.pic').appendChild(pv);
+  } else wrap.querySelector('.pic').remove();
   const ta = wrap.querySelector('textarea');
   ta.value = item.tokens.map(tokenOutput).join('\n');
   ta.rows = Math.max(8, item.tokens.length+1);
@@ -697,7 +715,7 @@ function renderItem(item){
     items.splice(items.indexOf(item),1); wrap.remove(); relabel(); regenerate();
     if (!items.length) $('list').innerHTML='<div class="empty">尚未加入圖片。</div>';
   };
-  wrap.querySelector('[data-act=learn]').onclick = () => learnFrom(item);
+  const lb = wrap.querySelector('[data-act=learn]'); if (lb) lb.onclick = () => learnFrom(item);
   $('list').appendChild(wrap);
   updateFlags(item);
 }
@@ -722,6 +740,10 @@ function updateFlags(item){
   if (odd.length) html += `<div>位數與多數不同（真的是短碼就沒問題，否則可能漏字）：${odd.map(s=>`<span class="pill warn">${esc(s)}</span>`).join('')}</div>`;
   if (low.length) html += `<div>字形較不確定，建議看一眼（圖上橘框）：${low.map(s=>`<span class="pill warn">${esc(s)}</span>`).join('')}</div>`;
   if (fixed.length) html += `<div>已依檢查碼自動更正，請對照圖片確認（圖上橘框）：${fixed.map(s=>`<span class="pill warn">${esc(s)}</span>`).join('')}</div>`;
+  if (!lines.length){
+    const d = (item.res && item.res.debug) || {};
+    html = `<div style="color:var(--bad)">這張圖辨識不到病歷號。可以直接在上面文字框輸入，或把這張圖另存成檔案傳給 Claude 調整。<br><span style="color:var(--muted)">偵錯資訊：${d.W||'?'}×${d.H||'?'} px，門檻 ${d.T!=null?d.T:'?'}，文字帶 ${d.bands!=null?d.bands:'?'}／有效列 ${d.lines!=null?d.lines:'?'}</span></div>`;
+  }
   if (!html) html = `<span class="ok">✓ 全部 ${lines.length} 筆格式與檢查碼皆正確</span>`;
   item.el.querySelector('.flags').innerHTML = html;
 }
@@ -808,8 +830,17 @@ async function copyText(text, msg){
 function handleFiles(list){ for (const f of list) if (f.type && f.type.startsWith('image/')) addImageBlob(f); }
 document.addEventListener('paste', e => {
   const its = e.clipboardData && e.clipboardData.items; if (!its) return;
+  const txt = e.clipboardData.getData('text/plain') || '';
+  const ids = (txt.match(/\d{5,8}\s*-\s*\d/g) || []).map(s=>s.replace(/\s/g,''));
+  let imgFile = null;
+  for (const it of its){ if (it.type.startsWith('image/')){ const f=it.getAsFile(); if(f){ imgFile=f; break; } } }
+  if (ids.length && (imgFile || e.target.tagName!=='TEXTAREA')){
+    e.preventDefault();
+    if (imgFile) addImageBlob(imgFile, ids); else processImage(null, ids);
+    toast(`從 Excel 文字直接讀到 ${ids.length} 筆病歷號`); return;
+  }
   let got=false;
-  for (const it of its){ if (it.type.startsWith('image/')){ const f=it.getAsFile(); if(f){ addImageBlob(f); got=true; } } }
+  if (imgFile){ addImageBlob(imgFile); got=true; }
   if (got){ e.preventDefault(); return; }
   if (e.target && e.target.tagName==='TEXTAREA') return; // 文字照常貼進文字框
   toast('剪貼簿裡沒有圖片');
